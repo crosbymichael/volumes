@@ -12,14 +12,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containerd/containerd"
+	"github.com/containerd/containerd/mount"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 )
 
-func NewIscsiVolume(id string, t *Target, lun int, fstype string, opts ...MountOpts) Volume {
+func NewIscsiVolume(t *Target, lun int, fstype string, opts ...MountOpts) Volume {
 	v := &iscsiVolume{
-		id:     id,
 		target: t,
 		lun:    lun,
 		fstype: fstype,
@@ -31,15 +32,10 @@ func NewIscsiVolume(id string, t *Target, lun int, fstype string, opts ...MountO
 }
 
 type iscsiVolume struct {
-	id      string
 	target  *Target
 	lun     int
 	fstype  string
 	options []string
-}
-
-func (i *iscsiVolume) ID() string {
-	return i.id
 }
 
 func (i *iscsiVolume) Type() VolumeType {
@@ -58,6 +54,16 @@ func (i *iscsiVolume) OCIMount(dest string) specs.Mount {
 func (i *iscsiVolume) Mount(dest string) error {
 	flags, data := parseMountOptions(i.options)
 	return unix.Mount(i.target.path(i.lun), dest, i.fstype, uintptr(flags), data)
+}
+
+func (i *iscsiVolume) Mounts() []mount.Mount {
+	return []mount.Mount{
+		{
+			Type:    i.fstype,
+			Source:  i.target.path(i.lun),
+			Options: i.options,
+		},
+	}
 }
 
 const defaultLUN = 0
@@ -182,4 +188,10 @@ func parseTargets(p *Portal, data []byte) ([]*Target, error) {
 		})
 	}
 	return out, nil
+}
+
+func WithTargetLogout(t *Target) containerd.ProcessDeleteOpts {
+	return func(ctx context.Context, p containerd.Process) error {
+		return t.Logout(ctx)
+	}
 }

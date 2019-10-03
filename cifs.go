@@ -3,13 +3,13 @@ package volumes
 import (
 	"fmt"
 
+	"github.com/containerd/containerd/mount"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
 )
 
-func NewCifsVolume(id, source string, opts ...MountOpts) Volume {
+func NewCifsVolume(source string, opts ...MountOpts) Volume {
 	v := &cifsVolume{
-		id:     id,
 		source: source,
 	}
 	for _, o := range opts {
@@ -19,13 +19,8 @@ func NewCifsVolume(id, source string, opts ...MountOpts) Volume {
 }
 
 type cifsVolume struct {
-	id      string
 	source  string
 	options []string
-}
-
-func (c *cifsVolume) ID() string {
-	return c.id
 }
 
 func (c *cifsVolume) Type() VolumeType {
@@ -44,6 +39,16 @@ func (c *cifsVolume) OCIMount(dest string) specs.Mount {
 func (c *cifsVolume) Mount(dest string) error {
 	flags, data := parseMountOptions(c.options)
 	return unix.Mount(c.source, dest, "cifs", uintptr(flags), data)
+}
+
+func (c *cifsVolume) Mounts() []mount.Mount {
+	return []mount.Mount{
+		{
+			Type:    "cifs",
+			Source:  c.source,
+			Options: c.options,
+		},
+	}
 }
 
 func WithUsernameAndPassword(username, password string) MountOpts {
