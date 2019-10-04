@@ -1,6 +1,8 @@
 package volumes
 
 import (
+	"context"
+
 	"github.com/containerd/containerd/mount"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
@@ -24,10 +26,6 @@ type bindVolume struct {
 	options []string
 }
 
-func (b *bindVolume) Type() VolumeType {
-	return Bind
-}
-
 func (b *bindVolume) OCIMount(dest string) specs.Mount {
 	return specs.Mount{
 		Type:        "bind",
@@ -42,12 +40,12 @@ func (b *bindVolume) Mount(dest string) error {
 	return unix.Mount(b.source, dest, "none", uintptr(flags), data)
 }
 
-func (b *bindVolume) Mounts() []mount.Mount {
+func (b *bindVolume) Mounts(ctx context.Context) ([]mount.Mount, error) {
 	return []mount.Mount{
 		{
 			Type:    "bind",
 			Source:  b.source,
 			Options: b.options,
 		},
-	}
+	}, nil
 }

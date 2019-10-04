@@ -1,6 +1,7 @@
 package volumes
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/containerd/containerd/mount"
@@ -23,10 +24,6 @@ type cifsVolume struct {
 	options []string
 }
 
-func (c *cifsVolume) Type() VolumeType {
-	return Cifs
-}
-
 func (c *cifsVolume) OCIMount(dest string) specs.Mount {
 	return specs.Mount{
 		Type:        "cifs",
@@ -41,14 +38,14 @@ func (c *cifsVolume) Mount(dest string) error {
 	return unix.Mount(c.source, dest, "cifs", uintptr(flags), data)
 }
 
-func (c *cifsVolume) Mounts() []mount.Mount {
+func (c *cifsVolume) Mounts(ctx context.Context) ([]mount.Mount, error) {
 	return []mount.Mount{
 		{
 			Type:    "cifs",
 			Source:  c.source,
 			Options: c.options,
 		},
-	}
+	}, nil
 }
 
 func WithUsernameAndPassword(username, password string) MountOpts {

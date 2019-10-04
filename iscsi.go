@@ -19,7 +19,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func NewIscsiVolume(t *Target, lun int, fstype string, opts ...MountOpts) Volume {
+func NewIscsiVolume(ctx context.Context, t *Target, lun int, fstype string, opts ...MountOpts) (Volume, error) {
 	v := &iscsiVolume{
 		target: t,
 		lun:    lun,
@@ -28,7 +28,10 @@ func NewIscsiVolume(t *Target, lun int, fstype string, opts ...MountOpts) Volume
 	for _, o := range opts {
 		o(&v.options)
 	}
-	return v
+	if err := t.Login(ctx); err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 type iscsiVolume struct {
@@ -36,10 +39,6 @@ type iscsiVolume struct {
 	lun     int
 	fstype  string
 	options []string
-}
-
-func (i *iscsiVolume) Type() VolumeType {
-	return Iscsi
 }
 
 func (i *iscsiVolume) OCIMount(dest string) specs.Mount {
@@ -56,14 +55,17 @@ func (i *iscsiVolume) Mount(dest string) error {
 	return unix.Mount(i.target.path(i.lun), dest, i.fstype, uintptr(flags), data)
 }
 
-func (i *iscsiVolume) Mounts() []mount.Mount {
+func (i *iscsiVolume) Mounts(ctx context.Context) ([]mount.Mount, error) {
+	if err := i.target.Login(ctx); err != nil {
+		return nil, err
+	}
 	return []mount.Mount{
 		{
 			Type:    i.fstype,
 			Source:  i.target.path(i.lun),
 			Options: i.options,
 		},
-	}
+	}, nil
 }
 
 const defaultLUN = 0
@@ -139,6 +141,19 @@ func NewPortal(ip, port string) *Portal {
 // Portal is an iscsi portal serving targets
 type Portal struct {
 	address string
+}
+
+func (p *Portal) Target(ctx context.Context, iqn string) (*Target, error) {
+	targets, err := p.Targets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range targets {
+		if t.IQN == iqn {
+			return t, nil
+		}
+	}
+	return nil, errors.Wrapf(os.ErrNotExist, "%s does not exist in portal", iqn)
 }
 
 // Targets returns all targets for the portal

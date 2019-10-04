@@ -16,6 +16,7 @@ import (
 const (
 	address = "/run/containerd/containerd.sock"
 	redis   = "docker.io/library/redis:alpine"
+	iqn     = "iqn.2019.com.crosbymichael.core:redis"
 )
 
 func main() {
@@ -28,31 +29,48 @@ func main() {
 }
 
 func runRedis(ctx context.Context, id string) error {
-	client, err := containerd.New(address)
+
+	var (
+		portal   = volumes.NewPortal("10.0.10.10", "3260")
+		provider = volumes.New()
+		vol      = volumes.NewBindVolume("/tmp/redis", volumes.WithOptions([]string{"rw"}))
+	)
+	target, err := portal.Target(ctx, iqn)
+	if err != nil {
+		return err
+	}
+	defer target.Logout(ctx)
+
+	iscsiVol, err := volumes.NewIscsiVolume(ctx, target, 0, "ext4")
+	if err != nil {
+		return err
+	}
+
+	// add the bind mount
+	provider.Add(ctx, id, vol)
+	// add the iscsi volume
+	provider.Add(ctx, iqn, iscsiVol)
+
+	client, err := containerd.New(address, containerd.WithMountProvider(provider.ID(), provider))
 	if err != nil {
 		return err
 	}
 	defer client.Close()
 
-	var (
-		target = "/tmp/redis"
-		volume = volumes.NewBindVolume(target, volumes.WithOptions([]string{"rw"}))
-	)
-
 	image, err := client.Pull(ctx, redis)
 	if err != nil {
 		return err
 	}
-	if err := image.UnpackTo(ctx, volumes.WithVolumeUnpack(volume)); err != nil {
+	// unpack to the iscsi volume
+	if err := image.UnpackTo(ctx, volumes.WithVolumeUnpack(iscsiVol)); err != nil {
 		return err
 	}
 	container, err := client.NewContainer(
 		ctx,
 		id,
-		containerd.WithNewSnapshot(id, image),
-		// need to hack around withimageconfig because it uses the fs and snapshotters for
-		// getting additional guids and usernames
-		containerd.WithNewSpec(oci.WithRootFSPath(target), oci.WithImageConfig(image), oci.WithRootFSPath("rootfs")),
+		// setup the volume id as the iqn this time
+		volumes.WithVolumeRootfs(iqn, image),
+		containerd.WithNewSpec(oci.WithImageConfig(image)),
 	)
 	if err != nil {
 		return err
@@ -61,7 +79,7 @@ func runRedis(ctx context.Context, id string) error {
 	defer container.Delete(ctx)
 
 	// use our stdio for the container's stdio
-	task, err := container.NewTask(ctx, cio.NewCreator(cio.WithStdio), volumes.WithVolume(volume))
+	task, err := container.NewTask(ctx, cio.NewCreator(cio.WithStdio))
 	if err != nil {
 		return err
 	}
